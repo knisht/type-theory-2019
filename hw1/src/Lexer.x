@@ -11,8 +11,6 @@ $asterisc = '
 tokens :-
 
   $white+                    ;
-  "#".*                      ;
-  "\n"+                      ;
   \(                         { \_ -> LeftP }
   \)                         { \_ -> RightP }
   \\                         { \_ -> LambdaT }
