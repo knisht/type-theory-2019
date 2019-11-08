@@ -2,8 +2,9 @@ module Reduction where
 import Grammar as G
 import Parser
 import Lexer
-import Data.Either
 import qualified Data.IntMap.Strict as Map
+import qualified Data.Set as Set
+import qualified Data.Map.Strict as SMap
 import Control.Monad.State.Lazy
 
 data MExpr = Anchor Int
@@ -14,11 +15,19 @@ data MExpr = Anchor Int
 
 type MMap = Map.IntMap MExpr
 type MState = State (MMap, Int)
+type SMap = SMap.Map String String
 
 rehydrate :: G.Expr -> MExpr
-rehydrate (G.Lambda s e) = MLambda s (rehydrate e)
-rehydrate (G.Appl e i)   = MAppl (rehydrate e) (rehydrate i)
-rehydrate (G.Var s)      = MVar s
+rehydrate e = smartRehydrate e SMap.empty
+
+encode :: String -> String
+encode = (++ "1337''''")
+
+smartRehydrate :: G.Expr -> SMap -> State MExpr
+smartRehydrate (G.Lambda s e) set = let newSet = SMap.insert s (encode set) set in
+  MLambda (encode s) (smartRehydrate e newSet)
+smartRehydrate (G.Appl e i) set = MAppl (smartRehydrate e set) (smartRehydrate i set)
+smartRehydrate (G.Var s) set = if s `Set.member` set then MVar (encode s) else MVar s
 
 
 instance Show MExpr where
@@ -113,7 +122,7 @@ iteratedReduction step iters initial = iteratedReductionHelper step iters 0 init
 iteratedReductionHelper :: Int -> Int -> Int -> MExpr -> MState [Expr]
 iteratedReductionHelper step iters counter initial = 
   if iters == 0
-  then (dehydrate initial) >>= (\x -> return $ [x])
+  then (dehydrate initial) >>= return . (:[])
   else do
     currentStatement <- dehydrate initial
     (e, b)           <- findReduction initial
@@ -139,10 +148,20 @@ dehydrate e =
       dehydrate r
 
 
+--removeEncoding :: G.Expr -> G.Expr
+--removeEncoding = fst . smartRemoveEncoding Set.empty
+
+--smartRemoveEncoding :: MSet -> G.Expr -> (G.Expr, MSet)
+--smartRemoveEncoding set e = case e of
+--  (Lambda s e2) -> let innerSet = smartRemoveEncoding set e2 in
+--    if s `Set.member` innerSet then s = tail . tail . s
+
 emptyState :: (MMap, Int)
 emptyState = (Map.empty, 0)
 
-
+fromRight :: a -> Either b a -> a
+fromRight x (Left _)  = x
+fromRight _ (Right x) = x 
 
 -- run :: (MExpr -> a) -> String -> a
 -- run f = f . getM

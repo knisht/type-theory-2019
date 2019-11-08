@@ -4,19 +4,18 @@ import Grammar (Expr (..))
 import Lexer (alexScanTokens)
 import Parser (parseLambda)
 import Reduction
-import Data.Either
+import Data.List
 import Data.List.Split
 
 main :: IO ()
 main = do
   line <- getLine
-  let numbers = splitOn " " line
+  let numbers = Data.List.filter (\x -> length x > 0) (splitOn " " line)
   let m = read (numbers !! 0) :: Int
-  let n = read (numbers !! 1) :: Int
+  let k = read (numbers !! 1) :: Int
   input <- getContents
-  case parseLambda (alexScanTokens input) of
-    Left err   -> putStrLn err
-    Right expr -> putStrLn $ show expr
+  let result = reduceLambda m k input
+  putStr result
 
 
 reduceLambda :: Int -> Int -> String -> String
@@ -24,7 +23,10 @@ reduceLambda m k s =
   let expr = fromRight undefined $ parseLambda (alexScanTokens s) 
       results = reduceExpr m k expr  
   in
-  (show <$> results) >>= (\line -> line ++ "\n") 
+  if (k == 0) then s ++ "\n" else (show <$> results) >>= (++"\n") 
 
-runParser :: String -> Expr
-runParser s = fromRight undefined $ parseLambda (alexScanTokens s)
+
+strongReduce :: String -> IO ()
+strongReduce s = do
+  let reduced = reduceLambda 20 1 s
+  putStr reduced
