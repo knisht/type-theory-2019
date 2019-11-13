@@ -2,10 +2,11 @@ module Reduction where
 import Grammar as G
 import Parser
 import Lexer
-import qualified Data.IntMap.Strict as Map
+--import qualified Data.IntMap.Strict as Map
 import qualified Data.Set as Set
 import qualified Data.Map.Strict as SMap
-import Control.Monad.State.Lazy
+import Control.Monad.State.Strict
+import qualified Data.HashMap.Strict as Map
 
 data MExpr = Anchor Int 
            | MLambda String MExpr
@@ -13,9 +14,9 @@ data MExpr = Anchor Int
            | MVar String
            deriving (Eq, Ord)
 
-type MMap = Map.IntMap MExpr
+type MMap = Map.HashMap Int MExpr
 type MState = State (MMap, Int)
-type SMap = SMap.Map String String
+type SMap = Map.HashMap String String
 type MSet = Set.Set String
 
 rehydrate :: G.Expr -> MExpr
@@ -38,7 +39,9 @@ instance Show MExpr where
 
 
 createAnchor :: MExpr -> MState MExpr
-createAnchor e = do
+createAnchor e = case e of
+  (Anchor _) -> return e
+  _ -> do 
     i <- snd <$> get 
     let a = Anchor i
     modify (\(mmap, i) -> (Map.insert i e mmap, i + 1))
@@ -48,11 +51,11 @@ getM :: String -> MExpr
 getM s = rehydrate $ fromRight undefined $ parseLambda (alexScanTokens s)
 
 
-doSubstitution :: MExpr -> String -> MExpr -> MState MExpr
-doSubstitution left var target = do
+doSubstitution :: MExpr -> String -> MSet -> MExpr -> MState MExpr
+doSubstitution left var contextVars target = do
   vars <- freeVars target
   let nvars = Set.delete var vars
-  doSubstitutionImpl left var target vars Set.empty
+  doSubstitutionImpl left var target (Set.union vars contextVars) Set.empty
 
 removeCollisions :: MSet -> MSet -> MExpr -> MState (MExpr, Bool)
 removeCollisions set met e = case e of
@@ -82,17 +85,13 @@ findEncodedImpl set ind name = let newS = name ++ (show ind) in
 doSubstitutionImpl :: MExpr -> String -> MExpr -> MSet -> MSet -> MState MExpr
 doSubstitutionImpl left var target fvars met = do
   let runSubst x y = doSubstitutionImpl x var target fvars y
-  case left of
-    m@(Anchor i) -> do
-                    expr <- extractMExpr m
-                    case expr of 
-                      (MLambda t _) -> if t == varnewExpr <- runSubst expr met
-                    return newExpr
+  inside <- unwrapTillNearest left >>= extractMExpr
+  case inside of
     l@(MLambda s e) -> do
       if s == var 
       then do
-        (expr, _) <- removeCollisions fvars met l
-        return expr 
+        (expr, res) <- removeCollisions fvars met l
+        return (if res then expr else left) 
       else do
         let newMet = (Set.insert s met)
         let newS = findEncoded fvars newMet s
@@ -128,30 +127,26 @@ extractMExpr m = case m of
   m -> return m
 
 
-shallowExtract :: MExpr -> MState MExpr
-shallowExtract e = case e of
-  (Anchor i) -> extractMExpr e
-  m -> return m
 
-findReduction :: MExpr -> MState (MExpr, Bool)
-findReduction e = do
+findReduction :: MExpr -> MSet -> MState (MExpr, Bool)
+findReduction e cvars = do
   case e of
-    (MAppl _ _)   -> reduceAppl e
-    (MLambda s e) -> (return e) >>= (\e -> tryReduce e (\x -> MLambda s x))
+    (MAppl _ _)   -> reduceAppl e cvars
+    (MLambda s e) -> (return e) >>= (\e -> tryReduce e (Set.insert s cvars) (\x -> MLambda s x))
     m@(MVar x)    -> return (m, False)
     m@(Anchor s)  -> do 
-                     e <- extractMExpr m
-                     (r, b) <- findReduction e
+                     e <- unwrapTillNearest m >>= extractMExpr 
+                     (r, b) <- findReduction e cvars
                      if b then do
                                modify (\(map, i) -> (Map.insert s r map, i)) 
                                return (m, True)
                      else do 
                             return (m, False) 
 
-reduceAppl :: MExpr -> MState (MExpr, Bool)
-reduceAppl gm@(MAppl e1 e2) = do
+reduceAppl :: MExpr -> MSet -> MState (MExpr, Bool)
+reduceAppl gm@(MAppl e1 e2) cvars = do
     ne1 <- unwrapTillNearest e1
-    forceReduceAppl $ MAppl ne1 e2
+    forceReduceAppl (MAppl ne1 e2) cvars
 
 unwrapTillNearest :: MExpr -> MState MExpr
 unwrapTillNearest e = do
@@ -163,26 +158,23 @@ unwrapTillNearest e = do
         _ -> return e 
     m -> return m
 
-forceReduceAppl :: MExpr -> MState (MExpr, Bool)
-forceReduceAppl gm@(MAppl e1 e2) = do 
-  ne1 <- shallowExtract e1
+forceReduceAppl :: MExpr -> MSet -> MState (MExpr, Bool)
+forceReduceAppl gm@(MAppl e1 e2) cvars = do 
+  ne1 <- extractMExpr e1
   case ne1 of
     (MLambda s innerE) -> do
       newAnchor <- createAnchor e2
-      expr <- doSubstitution innerE s newAnchor
-      --case e1 of
-      --  (Anchor i) -> modify (\(m, j) -> (Map.insert i (MLambda s ) m, j))
-      --  m -> return ()
+      expr <- doSubstitution innerE s cvars newAnchor
       return (expr, True)
     other -> do  
-      m1 <- tryReduce e1 (\x -> MAppl x e2)
+      m1 <- tryReduce e1 cvars (\x -> MAppl x e2)
       if (snd m1) then return m1 
-                  else tryReduce e2 (\x -> MAppl other x) 
+                  else tryReduce e2 cvars (\x -> MAppl other x) 
 
 
-tryReduce :: MExpr -> (MExpr -> MExpr) -> MState (MExpr, Bool)
-tryReduce x f = do
-  (r, b) <- findReduction x
+tryReduce :: MExpr -> MSet -> (MExpr -> MExpr) -> MState (MExpr, Bool)
+tryReduce x cvars f = do
+  (r, b) <- findReduction x cvars
   return $ if b then (f r, True) else (f x, False)
 
 
@@ -207,7 +199,7 @@ iteratedReductionHelper step iters counter initial =
   then (dehydrate initial) >>= return . (:[])
   else do
     currentStatement <- dehydrate initial
-    (e, b)           <- findReduction initial
+    (e, b)           <- findReduction initial Set.empty
     let leftIters = if b then iters - 1 else 0 
     list             <- iteratedReductionHelper step leftIters (counter + 1) e
     if counter `mod` step == 0 && b then return $ currentStatement : list
@@ -224,7 +216,7 @@ iteratedReductionHelperDebug step iters counter initial =
   else do
     map <- show <$> fst <$> get
     currentStatement <- dehydrate initial
-    (e, b)           <- findReduction initial
+    (e, b)           <- findReduction initial Set.empty
     let leftIters = if b then iters - 1 else 0 
     list             <- iteratedReductionHelperDebug step leftIters (counter + 1) e
     if counter `mod` step == 0 && b then return $ (show initial ++" | "  ++ show map) : list
@@ -291,6 +283,9 @@ tr21 = "(\\e.(\\b.e ((\\i.i) e)) t) (b \\b.(\\g.l) t)"
 tr22 = "((\\q.((\\f.(q q)) q)) (((\\y.y)) y))"
 tr23 = "((\\a.(a a)) (\\n.((u (\\n.((\\t.h) x))) n)))"
 tr24 = "((\\w.((\\u.(u ((\\g.d) a))) ((\\r.(\\l.(\\w.l))) q))) l)"
+tr25 = "((\\j.(((\\t.(s j)) x) j)) (\\t.((\\a.t) x)))"
+tr26 = "((\\i.((a ((\\h.h) ((\\b.((\\i.b) b)) i))) i)) (\\i.((\\g.i) i)))"
+tr27 = "((\\i.((a (((\\b.((\\i.b) b)) i))) i)) (\\i.((\\g.i) i)))"
 -- run :: (MExpr -> a) -> String -> a
 -- run f = f . getM
 
