@@ -26,7 +26,10 @@ clean:
 
 
 parser: $(GENERATED) $(SOURCES)
-	$(HC) -O3 -i./src:lib -Ilib ./src/Main.hs -o parser 
+	$(HC) -O2 -i./src ./src/Main.hs -o parser 
+
+prof: $(GENERATED) $(SOURCES)
+	$(HC) -prof -fprof-auto -rtsopts -O2 -i./src ./src/Main.hs -o parser
 
 $(GENERATED): $(GEN_SOURCES) $(SOURCES)
 	alex src/Lexer.x -o src/Lexer.hs
