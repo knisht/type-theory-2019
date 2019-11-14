@@ -1,17 +1,34 @@
 #!/bin/python
 import os
 import sys
+import signal
 
-for i in range(10000):
+class TimeoutException(Exception):
+    pass
+
+def timeout_handler(signum, frame):
+    raise TimeoutException
+
+signal.signal(signal.SIGALRM, timeout_handler)
+
+for i in range(1000000):
     test = os.popen("./a.out").read().rstrip()
-    ftest = "100 1\n" + test
+    ftest = "20 1\n" + test
     prefix = "echo \"" + ftest + "\" | "
     # print("On test:\n" + test)
-    one = os.popen(prefix + "./myparser").read().rstrip()
-    two = os.popen(prefix + "./vparser").read().rstrip()
-    
-    if one.count('\n') != two.count('\n'):
-        print("Error \n" + test)
-        sys.exit()
+    one = ""
+    two = ""
+    signal.alarm(5)
+    try:
+        one = os.popen(prefix + "./parser").read().rstrip()
+        two = os.popen(prefix + "./").read().rstrip()
+        if one.count('\n') != two.count('\n'):
+            print("Error: \n" + test)
+            sys.exit()
+        else:
+            print("Ok:" + str(i))
+    except TimeoutException:
+        print("___________TIMEOUT___________")
+        continue
     else:
-        print("Ok:" + str(i))
+        signal.alarm(0)

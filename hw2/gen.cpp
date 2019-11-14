@@ -40,7 +40,7 @@ string genAppl(container& names) {
 }
 
 char genName() {
-    return (char) ('a' + (genRand() % 26));
+    return (char) ('a' + (genRand() % 3));
 }
 
 string genLambda(container& names) {
