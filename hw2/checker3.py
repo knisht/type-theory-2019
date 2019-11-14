@@ -3,7 +3,7 @@ import os
 import sys
 
 onename = "myparser"
-twoname = "vparser"
+twoname = ""
 
 with open("test") as f : contents = f.read().rstrip()
 
