@@ -11,15 +11,9 @@ import Data.List
 main :: IO ()
 main = do
   line <- getLine
-  let numbers = (map read . words) line :: [Int] 
-  if length numbers < 2 
-    then putStrLn "no" 
-    else do
-      let m = (numbers !! 0)
-      let k = (numbers !! 1)
-      input <- getLine
-      --let result = reduceLambda m k input
-      putStr ""
+  let expr = runE line
+  let proof = infer expr
+  putStr proof
 
 
 runE :: String -> Expr

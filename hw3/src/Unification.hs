@@ -2,13 +2,27 @@ module Unification where
 import Types
 import Data.IntMap as Map
 import Control.Applicative
+import Debug
 
 type SMap = IntMap SType
 type REquation = (Equation, Bool {-is unique-})
 
 unify :: [Equation] -> Maybe SMap
-unify list = toMap <$> (phasedIteration $ rehydrate list)
+unify list = toMap <$> ((phasedIteration $ rehydrate list) >>= checkSanity)
  
+
+checkSanity :: [REquation] -> Maybe [REquation]
+checkSanity [] = return []
+checkSanity (e : es) = liftA2 (:) (ensureSanity e) (checkSanity es)
+
+ensureSanity :: REquation -> Maybe REquation
+ensureSanity m@(((Atom i) := b), _) = if findIndex i b then Nothing else return m
+ensureSanity m = return m
+
+findIndex :: Int -> SType -> Bool
+findIndex i (Atom j) = j == i
+findIndex i (a :-> b) = findIndex i a || findIndex i b
+
 phasedIteration :: [REquation] -> Maybe [REquation]
 phasedIteration list = let phased = unificationPhase list in
  case phased of

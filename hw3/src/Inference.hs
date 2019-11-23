@@ -4,10 +4,12 @@ import Data.Set
 import Control.Monad.State.Strict
 import Data.Map.Strict as Map
 import Data.IntMap as IMap
+import Data.Set as Set
 import Data.Bifunctor
+import Data.List as List
 import Unification
 import Types
-
+import Debug
 
 data Term = Term Expr SType
 type MState a = State (IMap.IntMap SType, Map String Int, Int) a 
@@ -16,14 +18,20 @@ type MState a = State (IMap.IntMap SType, Map String Int, Int) a
 
 
 infer :: Expr -> String
-infer e = let (exprs, mytype) = genSystemOfTypeEq e
+infer e = let (varmap, exprs, mytype) = genSystemOfTypeEqFull e
+              freeVars = genFreeVars e
               mmap = unify exprs in
  case mmap of
-    Nothing  -> "There is no type"
-    Just map -> (evalState (genProofs 0 e "") (map, Map.empty, 0)) >>= (++ "\n")
+    Nothing  -> "Expression has no type\n"
+    Just map -> let hypset = genHypSet map varmap freeVars in
+      (snd $ (evalState (genProofs 0 e hypset) (map, Map.empty, 1))) >>= (++ "\n")
 
 genSystemOfTypeEq :: Expr -> ([Equation], SType)
-genSystemOfTypeEq e = evalState (genSystemOfTypeEqS e) (Map.empty, 0)
+genSystemOfTypeEq e = evalState (genSystemOfTypeEqS e) (Map.empty, 1)
+
+genSystemOfTypeEqFull :: Expr -> (Map String Int, [Equation], SType)
+genSystemOfTypeEqFull e = case runState (genSystemOfTypeEqS e) (Map.empty, 1) of
+  ((eqs, stype), (map, _))  -> (map, eqs, stype)
 
 genSystemOfTypeEqS :: Expr -> State (Map String Int, Int) ([Equation], SType)
 genSystemOfTypeEqS e = case e of
@@ -38,8 +46,24 @@ genSystemOfTypeEqS e = case e of
   (Lambda s e) -> do
     atom <- genAtom s
     (eqs, te) <- genSystemOfTypeEqS e
+    ungenAtom s
     return $ (eqs, atom :-> te)
 
+
+genFreeVars :: Expr -> Set String
+genFreeVars e = case e of
+  Var s -> Set.singleton s
+  Appl a b -> Set.union (genFreeVars a) (genFreeVars b)
+  Lambda s e -> Set.delete s (genFreeVars e)
+
+
+genHypSet :: IMap.IntMap SType -> Map String Int -> Set String -> String
+genHypSet imap vmap s =  
+  let lambda = (\x -> x ++ " : " ++ (show . (genTypeRaw imap) . ((Map.!) vmap)) x) 
+      row = List.intercalate ", " (Set.elems $ Set.map lambda s)  in
+  case row of
+    [] -> []
+    _ -> row ++ " "
 
 
 genAtom :: String -> State (Map String Int, Int) SType
@@ -53,6 +77,10 @@ genAtom s = do
       modify $ bimap morphMap (+1)
       return $ Atom i
 
+ungenAtom :: String -> State (Map String Int, Int) () 
+ungenAtom s = do
+  let morphMap = if s == "_" then id else Map.delete s
+  modify $ bimap morphMap id
 
 fromRight :: Either a b -> b
 fromRight e = case e of
@@ -71,6 +99,11 @@ genAtom3 s = do
       return $ Atom i
 
 
+ungenAtom3 :: String -> MState ()
+ungenAtom3 s = do
+  let morphMap = if s == "_" then id else Map.delete s
+  modify $ bimap morphMap id
+
 genType :: SType -> MState SType
 genType (Atom i) = do
   (map, _, _) <- get
@@ -79,24 +112,43 @@ genType (Atom i) = do
     (Just a) -> return a
     Nothing  -> return $ Atom i
 
-genProofs :: Int -> Expr -> String -> MState [String]
+genTypeRaw :: IMap.IntMap SType -> Int -> SType
+genTypeRaw map i = let result = map IMap.!? i in
+  case result of 
+    (Just a) -> a
+    Nothing  -> Atom i 
+
+
+genProofs :: Int -> Expr -> String -> MState (String, [String])
 genProofs depth e hyps = case e of 
   (Var s) -> do
     atom <- genAtom3 s
     myType <- genType atom
-    return [(genDepth depth ++ hyps ++ "|- " ++ render e myType ++ " [rule #1]")]
+    let strType = show myType
+    return (strType, [(genDepth depth ++ hyps ++ "|- " ++ render e myType ++ " [rule #1]")])
   (Appl e1 e2) -> do
-    left  <- genProofs (depth + 1) e1 hyps
-    right <- genProofs (depth + 1) e2 hyps
+    (_, left)  <- genProofs (depth + 1) e1 hyps
+    (_, right) <- genProofs (depth + 1) e2 hyps
     atom <- genAtom3 "_"
     myType <- genType atom
-    return $ (genDepth depth ++ hyps ++ "|- " ++ render e myType ++ " [rule #2]") : (left ++ right) 
+    let strType = show myType
+    return $ (strType, 
+             (genDepth depth ++ hyps ++ "|- " ++ render e myType ++ " [rule #2]") : (left ++ right)) 
   (Lambda s m) -> do
     atom <- genAtom3 s
     myType <- genType atom
-    let newHyp = render (Var s) myType
-    innerRepr <- genProofs (depth + 1) m (newHyp ++ ", " ++ hyps)
-    return $ (genDepth depth ++ hyps ++ "|- " ++ render e myType ++ " [rule #3]") : innerRepr
+    (innerType, innerRepr) <- genProofs (depth + 1) m (addHyp hyps s myType)
+    let wholeType = "(" ++ show myType ++ " -> " ++ innerType ++ ")"
+    let wholeExprRepr = show e ++ " : " ++ wholeType
+    ungenAtom3 s
+    return (wholeType, (genDepth depth ++ hyps ++ "|- " ++ wholeExprRepr ++ " [rule #3]") : innerRepr)
+
+
+addHyp :: String -> String -> SType -> String
+addHyp hyps s stype = let repr = render (Var s) stype in
+  case hyps of
+  [] -> repr ++ " "
+  _  -> repr ++ ", " ++ hyps
 
 render :: Expr -> SType -> String
 render e s = show e ++ " : " ++ show s 
@@ -104,14 +156,6 @@ render e s = show e ++ " : " ++ show s
 genDepth :: Int -> String
 genDepth 0 = ""
 genDepth i = genDepth (i - 1) ++ "*   "
-
-
-
-
-
-
-
-
 
 
 
