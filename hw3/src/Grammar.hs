@@ -10,6 +10,6 @@ data Expr = Lambda String Expr  |
 
 instance Show Expr where
   show (Var x) = x
-  show (Lambda e1 e2) = "(\\" ++ e1 ++ "." ++ show e2 ++ ")"
+  show (Lambda e1 e2) = "(\\" ++ e1 ++ ". " ++ show e2 ++ ")"
   show (Appl e1 e2) = "(" ++ show e1 ++ " " ++ show e2 ++ ")"
 

@@ -7,8 +7,16 @@ import Debug
 type SMap = IntMap SType
 type REquation = (Equation, Bool {-is unique-})
 
+data Triple a = TNoth | TErr | TJust a
+
+instance Functor Triple where
+  fmap f t = case t of
+    TJust a -> TJust $ f a
+    TNoth -> TNoth
+    TErr -> TErr
+
 unify :: [Equation] -> Maybe SMap
-unify list = toMap <$> ((phasedIteration $ rehydrate list) >>= checkSanity)
+unify list = toMap <$> ((phasedIteration $ rehydrate list))
  
 
 checkSanity :: [REquation] -> Maybe [REquation]
@@ -26,22 +34,28 @@ findIndex i (a :-> b) = findIndex i a || findIndex i b
 phasedIteration :: [REquation] -> Maybe [REquation]
 phasedIteration list = let phased = unificationPhase list in
  case phased of
-    Nothing -> Just list
-    Just a  -> phasedIteration a 
+    TNoth -> Just list
+    TErr -> Nothing
+    TJust a  -> phasedIteration a 
 
 toMap :: [REquation] -> SMap
 toMap [] = Map.empty
 toMap (((Atom i) := b, _) : tail) = Map.insert i b $ toMap tail 
-
+toMap (e : tail) = toMap tail
 
 rehydrate :: [Equation] -> [REquation]
 rehydrate = ((\x -> (x,False)) <$>)
 
+fromMaybeToTriple :: Maybe REquation -> Triple REquation
+fromMaybeToTriple m = case m of
+  Just a -> case ensureSanity a of
+    Just a -> TJust a
+    Nothing -> TErr
+  Nothing -> TNoth
 
--- todo: contradiction
-unificationPhase :: [REquation] -> Maybe [REquation]
+unificationPhase :: [REquation] -> Triple [REquation]
 unificationPhase list = let (left, right, target) = unificationPhasePassing [] list in
-  (\e -> substituteDual left right e) <$> target
+  (\e -> substituteDual left right e) <$> (fromMaybeToTriple target)
 
 unificationPhasePassing :: [REquation] -> [REquation] -> ([REquation], [REquation], Maybe REquation)
 unificationPhasePassing l [] = (l, [], Nothing)

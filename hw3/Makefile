@@ -35,5 +35,5 @@ $(GENERATED): $(GEN_SOURCES) $(SOURCES)
 	alex src/Lexer.x -o src/Lexer.hs
 	happy src/Parser.y -o src/Parser.hs
 
-pack: $(GENERATED)
+pack: 
 	zip $(PACKAGE) -r Makefile src lib

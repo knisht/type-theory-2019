@@ -10,7 +10,7 @@ import Data.List
 
 main :: IO ()
 main = do
-  line <- getLine
+  line <- getContents
   let expr = runE line
   let proof = infer expr
   putStr proof

@@ -56,15 +56,16 @@ genFreeVars e = case e of
   Appl a b -> Set.union (genFreeVars a) (genFreeVars b)
   Lambda s e -> Set.delete s (genFreeVars e)
 
+safeGet :: Map String Int -> String -> Int
+safeGet m s = case m Map.!? s of
+  Just i -> i
+  Nothing -> 1
 
 genHypSet :: IMap.IntMap SType -> Map String Int -> Set String -> String
 genHypSet imap vmap s =  
-  let lambda = (\x -> x ++ " : " ++ (show . (genTypeRaw imap) . ((Map.!) vmap)) x) 
+  let lambda = (\x -> x ++ " : " ++ (show . (genTypeRaw imap) . (safeGet vmap)) x) 
       row = List.intercalate ", " (Set.elems $ Set.map lambda s)  in
-  case row of
-    [] -> []
-    _ -> row ++ " "
-
+  row 
 
 genAtom :: String -> State (Map String Int, Int) SType
 genAtom s = do
@@ -125,7 +126,7 @@ genProofs depth e hyps = case e of
     atom <- genAtom3 s
     myType <- genType atom
     let strType = show myType
-    return (strType, [(genDepth depth ++ hyps ++ "|- " ++ render e myType ++ " [rule #1]")])
+    return (strType, [(genDepth depth ++ addSpace hyps ++ "|- " ++ render e myType ++ " [rule #1]")])
   (Appl e1 e2) -> do
     (_, left)  <- genProofs (depth + 1) e1 hyps
     (_, right) <- genProofs (depth + 1) e2 hyps
@@ -133,7 +134,7 @@ genProofs depth e hyps = case e of
     myType <- genType atom
     let strType = show myType
     return $ (strType, 
-             (genDepth depth ++ hyps ++ "|- " ++ render e myType ++ " [rule #2]") : (left ++ right)) 
+             (genDepth depth ++ addSpace hyps ++ "|- " ++ render e myType ++ " [rule #2]") : (left ++ right)) 
   (Lambda s m) -> do
     atom <- genAtom3 s
     myType <- genType atom
@@ -141,14 +142,17 @@ genProofs depth e hyps = case e of
     let wholeType = "(" ++ show myType ++ " -> " ++ innerType ++ ")"
     let wholeExprRepr = show e ++ " : " ++ wholeType
     ungenAtom3 s
-    return (wholeType, (genDepth depth ++ hyps ++ "|- " ++ wholeExprRepr ++ " [rule #3]") : innerRepr)
+    return (wholeType, (genDepth depth ++ addSpace hyps ++ "|- " ++ wholeExprRepr ++ " [rule #3]") : innerRepr)
 
+addSpace :: String -> String
+addSpace [] = []
+addSpace s  = s ++ " "
 
 addHyp :: String -> String -> SType -> String
 addHyp hyps s stype = let repr = render (Var s) stype in
   case hyps of
-  [] -> repr ++ " "
-  _  -> repr ++ ", " ++ hyps
+  [] -> repr
+  _  -> hyps ++ ", " ++ repr
 
 render :: Expr -> SType -> String
 render e s = show e ++ " : " ++ show s 
@@ -158,4 +162,4 @@ genDepth 0 = ""
 genDepth i = genDepth (i - 1) ++ "*   "
 
 
-
+hardExpr = "((\\s.(s ((s s) s))) (\\p.(\\g.(\\m.(\\f.f)))))"
